@@ -162,7 +162,7 @@ def configure_extensions(app):
 
     if app.config.get("CORS"):
         origins = app.config.get("CORS_ORIGIN", "*")
-        allow_headers = app.config.get("CORS_ALLOW_HEADERS", "Content-Type")
+        allow_headers = app.config.get("CORS_ALLOW_HEADERS", "Authorization,Content-Type")
         methods = app.config.get("CORS_ALLOW_METHODS", "GET,PUT,POST,DELETE,OPTIONS")
         cors.init_app(
             app,

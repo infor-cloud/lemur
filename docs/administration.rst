@@ -1084,6 +1084,16 @@ If you are not using a custom authorization provider you do not need to configur
 
             USER_DOMAIN_AUTHORIZATION_PROVIDER = "<yourauthorizationpluginslug>"
 
+.. data:: LEMUR_PRIVATE_AUTHORITY_PLUGIN_NAMES
+    :noindex:
+
+        Lemur can be used to issue certificates with private CA. One can write own issuer plugin to do so. Domain level authorization
+        is skipped for private CA i.e., the one implementing custom issuer plugin. Currently this config is not used elsewhere.
+
+        ::
+
+            LEMUR_PRIVATE_AUTHORITY_PLUGIN_NAMES = ["issuerpluginslug1", "issuerpluginslug2"]
+
 Metric Providers
 ~~~~~~~~~~~~~~~~
 
@@ -1621,6 +1631,16 @@ Will be the sender of all notifications, so ensure that it is verified with AWS.
 
 SES if the default notification gateway and will be used unless SMTP settings are configured in the application configuration
 settings.
+
+NS1 ACME Plugin
+~~~~~~~~~~~~~~~~~
+
+The NS1 ACME plugin allows DNS1 validation using NS1 domain services.
+
+.. data:: NS1_KEY
+   :noindex:
+
+           The NS1 read/write API key for managing TXT records for domain validation
 
 PowerDNS ACME Plugin
 ~~~~~~~~~~~~~~~~~~~~~~

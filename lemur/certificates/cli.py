@@ -33,7 +33,8 @@ from lemur.certificates.service import (
     revoke as revoke_certificate,
     list_duplicate_certs_by_authority,
     get_certificates_with_same_prefix_with_rotate_on,
-    identify_and_persist_expiring_deployed_certificates
+    identify_and_persist_expiring_deployed_certificates,
+    send_certificate_expiration_metrics
 )
 from lemur.certificates.verify import verify_string
 from lemur.constants import SUCCESS_METRIC_STATUS, FAILURE_METRIC_STATUS, CRLReason
@@ -44,6 +45,7 @@ from lemur.extensions import metrics
 from lemur.notifications.messaging import send_rotation_notification, send_reissue_no_endpoints_notification, \
     send_reissue_failed_notification
 from lemur.plugins.base import plugins
+from sqlalchemy.orm.exc import MultipleResultsFound
 
 manager = Manager(usage="Handles all certificate related tasks.")
 
@@ -101,6 +103,23 @@ def validate_endpoint(endpoint_name):
 
         if not endpoint:
             print("[-] No endpoint found with name: {0}".format(endpoint_name))
+            sys.exit(1)
+
+        return endpoint
+
+
+def validate_endpoint_from_source(endpoint_name, source):
+    """
+    Ensuring that the specified endpoint from the given source exists.
+    :param endpoint_name:
+    :param source:
+    :return:
+    """
+    if endpoint_name and source:
+        endpoint = endpoint_service.get_by_name_and_source(endpoint_name, source)
+
+        if not endpoint:
+            print("[-] No endpoint found from source {0} with name: {1}".format(source, endpoint_name))
             sys.exit(1)
 
         return endpoint
@@ -194,6 +213,12 @@ def request_reissue(certificate, notify, commit):
     help="Name of the endpoint you wish to rotate.",
 )
 @manager.option(
+    "-s",
+    "--source",
+    dest="source",
+    help="Source of the endpoint you wish to rotate.",
+)
+@manager.option(
     "-n",
     "--new-certificate",
     dest="new_certificate_name",
@@ -220,7 +245,7 @@ def request_reissue(certificate, notify, commit):
     default=False,
     help="Persist changes.",
 )
-def rotate(endpoint_name, new_certificate_name, old_certificate_name, message, commit):
+def rotate(endpoint_name, source, new_certificate_name, old_certificate_name, message, commit):
     """
     Rotates an endpoint and reissues it if it has not already been replaced. If it has
     been replaced, will use the replacement certificate for the rotation.
@@ -239,7 +264,17 @@ def rotate(endpoint_name, new_certificate_name, old_certificate_name, message, c
     try:
         old_cert = validate_certificate(old_certificate_name)
         new_cert = validate_certificate(new_certificate_name)
-        endpoint = validate_endpoint(endpoint_name)
+        if source:
+            endpoint = validate_endpoint_from_source(endpoint_name, source)
+        else:
+            try:
+                endpoint = validate_endpoint(endpoint_name)
+            except MultipleResultsFound as e:
+                print("[!] Multiple endpoints found with name {0}, try narrowing the search down to an endpoint from a specific source by re-running this command with the --source flag.".format(endpoint_name))
+                log_data["message"] = "Multiple endpoints found with same name, unable to perform rotation"
+                log_data["duplicated_endpoint_name"] = endpoint_name
+                current_app.logger.info(log_data)
+                raise
 
         if endpoint and new_cert:
             print(
@@ -1009,7 +1044,14 @@ def process_duplicates(duplicate_candidate_cert, skipped_certs, rotation_disable
             certs_to_stay_on_autorotate.append(matching_cert.name)
 
     if skip_cert:
-        return False, certs_with_same_prefix
+        # Not reporting failure for skipping cert since they are not duplicates,
+        # comparision is working as intended
+        for skipped_cert in certs_with_same_prefix:
+            skipped_certs.append(skipped_cert.name)
+            metrics.send("disable_rotation_duplicates", "counter", 1,
+                         metric_tags={"status": "skipped", "certificate": skipped_cert.name}
+                         )
+        return True, None
 
     # If no certificate has endpoint, pick fallback_cert_to_rotate or any one to allow one certificate to auto-rotate.
     if not certs_to_stay_on_autorotate:
@@ -1046,8 +1088,14 @@ def is_duplicate(matching_cert, compare_to):
     matching_destinations = [destination.label for destination in matching_cert.destinations]
     compare_to_destinations = [destination.label for destination in compare_to.destinations]
 
-    return (len(matching_destinations) == len(compare_to_destinations)
-            and set(matching_destinations) == set(compare_to_destinations))
+    if (len(matching_destinations) == len(compare_to_destinations)
+            and set(matching_destinations) == set(compare_to_destinations)):
+        matching_sans = [domain.name for domain in matching_cert.domains]
+        compare_to_sans = [domain.name for domain in compare_to.domains]
+
+        return len(matching_sans) == len(compare_to_sans) and set(matching_sans) == set(compare_to_sans)
+
+    return False
 
 
 @manager.option(
@@ -1084,3 +1132,25 @@ def identify_expiring_deployed_certificates(exclude_domains, exclude_owners, com
         current_app.logger.exception("Error identifying expiring deployed certificates", exc_info=True)
 
     metrics.send("identify_expiring_deployed_certificates", "counter", 1, metric_tags={"status": status})
+
+
+@manager.command
+def expiration_metrics(expiry_window):
+    """
+    Iterates over all certificates and emits a metric for the days remaining for a certificate to expire.
+    This is used for building custom dashboards and alerts for certificate expiry.
+    """
+    try:
+        print("Starting to publish metrics for time left until cert expirations")
+        success, failure = send_certificate_expiration_metrics(expiry_window)
+        print(
+            f"Finished publishing metrics for time left until cert expirations! Sent: {success}"
+        )
+        status = SUCCESS_METRIC_STATUS
+    except Exception as e:
+        status = FAILURE_METRIC_STATUS
+        capture_exception()
+
+    metrics.send(
+        "expiration_metrics_job", "counter", 1, metric_tags={"status": status}
+    )

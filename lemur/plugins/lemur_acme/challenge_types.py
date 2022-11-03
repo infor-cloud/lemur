@@ -19,6 +19,7 @@ from sentry_sdk import capture_exception
 
 from lemur.authorizations import service as authorization_service
 from lemur.constants import ACME_ADDITIONAL_ATTEMPTS
+from lemur.common.utils import drop_last_cert_from_chain
 from lemur.exceptions import LemurException, InvalidConfiguration
 from lemur.extensions import metrics
 from lemur.plugins.base import plugins
@@ -132,16 +133,26 @@ class AcmeHttpChallenge(AcmeChallenge):
             finalized_orderr = acme_client.finalize_order(orderr, deadline, fetch_alternative_chains=True)
 
         except errors.ValidationError as validationError:
+            error_message = "Validation error occurred, can\'t complete challenges. See logs for more information."
             for authz in validationError.failed_authzrs:
                 for chall in authz.body.challenges:
                     if chall.error:
-                        current_app.logger.error(
-                            "ValidationError occured of type {}, with message {}".format(chall.error.typ,
-                                                                                         ERROR_CODES[chall.error.code]))
-            raise Exception('Validation error occured, can\'t complete challenges. See logs for more information.')
+                        error_message = f"ValidationError occurred of type: {chall.error.typ}, " \
+                                        f"with message: {ERROR_CODES[chall.error.code]}, " \
+                                        f"detail: {chall.error.detail}"
+                        current_app.logger.error(error_message)
+
+            raise Exception(error_message)
 
         pem_certificate, pem_certificate_chain = self.acme.extract_cert_and_chain(finalized_orderr.fullchain_pem,
                                                                                   finalized_orderr.alternative_fullchains_pem)
+
+        if "drop_last_cert_from_chain" in authority.options:
+            for option in json.loads(authority.options):
+                if option["name"] == "drop_last_cert_from_chain" and option["value"] is True:
+                    # skipping the last element
+                    pem_certificate_chain = drop_last_cert_from_chain(pem_certificate_chain)
+
         acme_uri = acme_client.client.net.account.uri.replace('https://', '')
         self.acme.log_remaining_validation(finalized_orderr.authorizations, acme_uri)
 
@@ -243,6 +254,12 @@ class AcmeDnsChallenge(AcmeChallenge):
         pem_certificate, pem_certificate_chain = self.create_certificate_immediately(
             acme_client, dns_authorization, csr
         )
+
+        if "drop_last_cert_from_chain" in authority.options \
+                and authority.options.get("drop_last_cert_from_chain") is True:
+            # skipping the last element
+            pem_certificate_chain = drop_last_cert_from_chain(pem_certificate_chain)
+
         # TODO add external ID (if possible)
         return pem_certificate, pem_certificate_chain, None
 

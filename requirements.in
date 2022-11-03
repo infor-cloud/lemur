@@ -28,11 +28,12 @@ future
 gunicorn
 hvac # required for the vault destination plugin
 inflection
-jinja2
+itsdangerous < 2.1.0 # requires Flask 2.0.3
+jinja2 < 3.1.0 # requires a newer version of Flask
 lockfile
 logmatic-python
 marshmallow-sqlalchemy == 0.23.1 #related to the marshmallow issue (to avoid conflicts)
-marshmallow<2.20.5 #schema duplicate issues https://github.com/marshmallow-code/marshmallow-sqlalchemy/issues/121
+marshmallow<2.21.1 #schema duplicate issues https://github.com/marshmallow-code/marshmallow-sqlalchemy/issues/121
 ndg-httpsclient
 paramiko  # required for the SFTP destination plugin
 pem
@@ -42,7 +43,7 @@ pyjwt
 pyOpenSSL
 pyyaml>=4.2b1 #high severity alert
 python_ldap
-redis==4.0.2  # remove once fakeredis supports 4.1.0 https://github.com/jamesls/fakeredis/pull/324
+redis < 4.4.0 # requires a newer release of fakeredis
 requests
 retrying
 sentry-sdk
@@ -51,4 +52,5 @@ SQLAlchemy-Utils
 sqlalchemy < 1.4.0 # ImportError: cannot import name '_ColumnEntity' https://github.com/sqlalchemy/sqlalchemy/issues/6226
 tabulate
 validators
+werkzeug < 2.1.0 # requires a newer version of Flask
 xmltodict

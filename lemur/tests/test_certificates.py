@@ -1153,19 +1153,75 @@ def test_certificate_get_body(client):
         ("", 401),
     ],
 )
-def test_certificate_post_update_notify(client, certificate, token, status):
-    # negate the current notify flag and pass it to update POST call to flip the notify
+def test_certificate_post_update_switches(client, certificate, token, status):
+    # negate the current notify/rotation flag and pass it to update POST call to flip the notify/rotation
     toggled_notify = not certificate.notify
+    toggled_rotation = not certificate.rotation
 
     response = client.post(
         api.url_for(Certificates, certificate_id=certificate.id),
-        data=json.dumps({"notify": toggled_notify}),
+        data=json.dumps({"notify": toggled_notify, "rotation": toggled_rotation}),
         headers=token
     )
 
     assert response.status_code == status
     if status == 200:
         assert response.json.get("notify") == toggled_notify
+        assert response.json.get("rotation") == toggled_rotation
+
+
+@pytest.mark.parametrize(
+    "token,status",
+    [
+        (VALID_USER_HEADER_TOKEN, 403),
+        (VALID_ADMIN_HEADER_TOKEN, 200),
+        (VALID_ADMIN_API_TOKEN, 200),
+        ("", 401),
+    ],
+)
+def test_certificates_update_owner(client, token, status, issuer_plugin, certificate, notification_plugin):
+    from lemur.certificates import service as certificate_service
+    from lemur.roles import service as role_service
+    from lemur.notifications import service as notification_service
+    from lemur.tests.factories import NotificationFactory, RoleFactory
+
+    new_cert_owner = "newowner@example.com"
+
+    notification_label = "DEFAULT_" + certificate.owner.split("@")[0].upper() + "_30_DAY"
+    notification = notification_service.get_by_label(notification_label)
+    if not notification:
+        notification = NotificationFactory(label=notification_label)
+    certificate.notifications.append(notification)
+    owner_role = role_service.get_by_name(certificate.owner)
+    if not owner_role:
+        owner_role = RoleFactory(name=certificate.owner)
+    certificate.roles.append(owner_role)
+
+    assert certificate.owner != new_cert_owner
+    assert notification in certificate.notifications
+    assert owner_role in certificate.roles
+    for role in certificate.roles:
+        assert new_cert_owner not in role.name
+
+    response = client.post(
+        api.url_for(CertificateUpdateOwner, certificate_id=certificate.id),
+        data=json.dumps({"owner": new_cert_owner}),
+        headers=token
+    )
+
+    assert response.status_code == status
+    if status == 200:
+        assert response.json.get("owner") == new_cert_owner
+        new_cert = certificate_service.get(certificate.id)
+        assert new_cert.owner == new_cert_owner
+
+        new_owner_role = role_service.get_by_name(new_cert_owner)
+        new_owner_notification = notification_service.get_by_label("DEFAULT_NEWOWNER_30_DAY")
+
+        assert notification not in new_cert.notifications
+        assert new_owner_notification in new_cert.notifications
+        assert owner_role not in new_cert.roles
+        assert new_owner_role in certificate.roles
 
 
 @pytest.mark.parametrize(
@@ -1676,3 +1732,92 @@ def test_allowed_issuance_for_domain(common_name, extensions, expected_error, au
                 assert False, f"UnauthorizedError occured, input: CN({common_name}), SAN({extensions})"
 
         assert wrapper.call_count == authz_check_count
+
+
+def test_send_certificate_expiration_metrics(certificate):
+    from lemur.certificates.service import send_certificate_expiration_metrics
+
+    new_cert = create_cert_that_expires_in_days(10)
+
+    success, failure = send_certificate_expiration_metrics()
+    assert failure == 0
+
+
+@pytest.mark.parametrize(
+    "cert_expiry, expiry_window, expected_result", [
+        (10, None, True),
+        (10, 60, True),
+        # cert expiry is outside the window
+        (70, 60, False)
+    ]
+)
+def test_get_certificates_for_expiration_metrics(certificate, cert_expiry, expiry_window, expected_result):
+    from lemur.certificates.service import get_certificates_for_expiration_metrics
+
+    new_cert = create_cert_that_expires_in_days(cert_expiry)
+    certs = get_certificates_for_expiration_metrics(expiry_window)
+
+    # check if new_cert is returned in certs list
+    assert (new_cert in certs) == expected_result
+
+
+def test_get_cert_expiry_in_days(certificate):
+    from lemur.certificates.service import _get_cert_expiry_in_days
+    new_cert = create_cert_that_expires_in_days(10)
+
+    assert _get_cert_expiry_in_days(new_cert.not_after) == 10
+
+
+def test_query_common_name(session):
+    from lemur.tests.factories import CertificateFactory
+    from lemur.certificates.service import query_common_name
+    from datetime import timedelta
+
+    cn1 = "testcn1.example.org"
+    cert_cn1_replaced = CertificateFactory()
+    cert_cn1_replaced.cn = cn1
+    cert_cn1_valid = CertificateFactory()
+    cert_cn1_valid.cn = cn1
+    cert_cn1_valid.owner = "owner1@example.org"
+    cert_cn1_valid.replaces.append(cert_cn1_replaced)
+    cert_cn1_valid2 = CertificateFactory()
+    cert_cn1_valid2.cn = cn1
+    cert_cn1_valid2.owner = "owner2@example.org"
+    yesterday = arrow.utcnow() + timedelta(days=-1)
+    cert_cn1_expired = CertificateFactory()
+    cert_cn1_expired.cn = cn1
+    cert_cn1_expired.not_after = yesterday
+    cert_cn1_revoked = CertificateFactory()
+    cert_cn1_revoked.cn = cn1
+    cert_cn1_revoked.status = "revoked"
+
+    cn2 = "testcn2.example.org"
+    cert_cn2 = CertificateFactory()
+    cert_cn2.cn = cn2
+
+    cn1_valid_certs = query_common_name(cn1, {"owner": "", "page": "", "count": ""})
+    assert len(cn1_valid_certs) == 2
+
+    cn1_valid_certs_paged = query_common_name(cn1, {"owner": "", "page": 1, "count": 100})
+    assert cn1_valid_certs_paged["total"] == 2
+    assert len(cn1_valid_certs_paged["items"]) == 2
+
+    cn1_valid_certs_paged_single = query_common_name(cn1, {"owner": "", "page": 1, "count": 1})
+    assert cn1_valid_certs_paged_single["total"] == 2
+    assert len(cn1_valid_certs_paged_single["items"]) == 1
+
+    cn1_owner1_valid_certs = query_common_name(cn1, {"owner": "owner1@example.org", "page": "", "count": ""})
+    assert len(cn1_owner1_valid_certs) == 1
+
+    cn1_owner1_valid_certs_paged = query_common_name(cn1, {"owner": "owner1@example.org", "page": 1, "count": 100})
+    assert cn1_owner1_valid_certs_paged["total"] == 1
+    assert len(cn1_owner1_valid_certs_paged["items"]) == 1
+
+    cn1_owner2_valid_certs = query_common_name(cn1, {"owner": "owner2@example.org", "page": "", "count": ""})
+    assert len(cn1_owner2_valid_certs) == 1
+
+    cn1_owner3_valid_certs = query_common_name(cn1, {"owner": "owner3@example.org", "page": "", "count": ""})
+    assert len(cn1_owner3_valid_certs) == 0
+
+    cn2_valid_certs = query_common_name(cn2, {"owner": "", "page": "", "count": ""})
+    assert len(cn2_valid_certs) == 1

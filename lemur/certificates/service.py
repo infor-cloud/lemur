@@ -145,7 +145,8 @@ def get_all_valid_certs(authority_plugin_name, paginate=False, page=1, count=100
         query = query.filter(Certificate.date_created <= created_on_or_before.format("YYYY-MM-DD"))
 
     if paginate:
-        items = database.paginate(query, page, count)
+        args = {"page": page, "count": count, "sort_by": "id", "sort_dir": "desc"}
+        items = database.sort_and_page(query, Certificate, args)
         return items['items']
 
     return query.all()
@@ -376,6 +377,23 @@ def update_switches(cert, notify_flag=None, rotation_flag=None):
     return database.update(cert)
 
 
+def update_owner(cert, new_cert_data):
+    """
+    Modify owner for certificate. Removes roles and notifications associated with prior owner.
+    :param cert: Certificate object to be updated
+    :param new_cert_data: Dictionary including cert fields to be updated (owner, notifications, roles).
+    These values are set in CertificateEditInputSchema and are generated for the new owner.
+    :return:
+    """
+    # remove all notifications and roles associated with old owner
+    cert.roles = new_cert_data["roles"] + [r for r in cert.roles if r.name != cert.owner]
+    notification_prefix = f"DEFAULT_{cert.owner.split('@')[0].upper()}"
+    cert.notifications = new_cert_data["notifications"] + [n for n in cert.notifications if not n.label.startswith(notification_prefix)]
+
+    cert.owner = new_cert_data["owner"]
+    return database.update(cert)
+
+
 def create_certificate_roles(**kwargs):
     # create a role for the owner and assign it
     owner_role = role_service.get_or_create(
@@ -465,7 +483,7 @@ def create(**kwargs):
             plugin_accounts = dest_plugin_accounts.setdefault(dest.plugin_name, {})
             account = get_plugin_option("accountNumber", dest.options)
             if account in plugin_accounts:
-                raise Exception(f"Too many destintions for plugin {dest.plugin_name} and account {account}")
+                raise Exception(f"Too many destinations for plugin {dest.plugin_name} and account {account}")
             plugin_accounts[account] = True
 
     try:
@@ -714,7 +732,8 @@ def query_common_name(common_name, args):
         query = query.filter(Certificate.cn.ilike(common_name))
 
     if paginate:
-        return database.paginate(query, page, count)
+        args = {"page": page, "count": count, "sort_by": "id", "sort_dir": "desc"}
+        return database.sort_and_page(query, Certificate, args)
 
     return query.all()
 
@@ -994,6 +1013,11 @@ def remove_from_destination(certificate, destination):
         plugin.clean(certificate=certificate, options=destination.options)
 
 
+def deactivate(certificate):
+    plugin = plugins.get(certificate.authority.plugin_name)
+    return plugin.deactivate_certificate(certificate)
+
+
 def revoke(certificate, reason):
     plugin = plugins.get(certificate.authority.plugin_name)
     plugin.revoke_certificate(certificate, reason)
@@ -1192,6 +1216,8 @@ def find_and_persist_domains_where_cert_is_deployed(certificate, excluded_domain
                     if parsed_serial == int(certificate.serial):
                         matched_ports_for_domain.append(port)
                         match = True
+                        current_app.logger.warning(f'Identified expiring deployed certificate {certificate.name} '
+                                                   f'at domain {domain_name} on port {port}')
                     status = SUCCESS_METRIC_STATUS
                 except Exception:
                     current_app.logger.info(f'Unable to check certificate for domain {domain_name} on port {port}',
@@ -1255,3 +1281,64 @@ def allowed_issuance_for_domain(common_name, extensions):
     # lemur UI copies CN as SAN (x509.DNSName). Permission check for CN might already be covered above.
     if check_permission_for_cn:
         is_authorized_for_domain(common_name)
+
+
+def send_certificate_expiration_metrics(expiry_window=None):
+    """
+    Iterate over each certificate and emit a metric for how many days until expiration.
+
+    :param expiry_window: defines the window for cert filter, ex: 90 will only return certs expiring in the next 90 days.
+    """
+    success = failure = 0
+
+    certificates = get_certificates_for_expiration_metrics(expiry_window)
+
+    for certificate in certificates:
+        try:
+            days_until_expiration = _get_cert_expiry_in_days(certificate.not_after)
+            has_active_endpoints = len(certificate.endpoints) > 0
+            is_replacement = len(certificate.replaces) > 0
+
+            metrics.send(
+                "certificates.days_until_expiration",
+                "gauge",
+                days_until_expiration,
+                metric_tags={
+                    "cert_id": certificate.id,
+                    "common_name": certificate.cn.replace("*", "star"),
+                    "has_active_endpoints": has_active_endpoints,
+                    "is_replacement": is_replacement
+                }
+            )
+            success += 1
+        except Exception as e:
+            current_app.logger.warn(
+                f"Error sending expiry metric for certificate: {certificate.name}", exc_info=True
+            )
+            failure += 1
+
+    return success, failure
+
+
+def get_certificates_for_expiration_metrics(expiry_window):
+    """
+
+    :param expiry_window: defines the window for cert filter, ex: 90 will only return certs expiring in the next 90 days.
+    :return: list of certificates
+    """
+    filters = [
+        Certificate.expired == false(),
+        Certificate.revoked == false(),
+        not_(Certificate.replaced.any())
+    ]
+
+    # if expiry_window param was passed in then get only certs within that window
+    if expiry_window:
+        filters.append(Certificate.not_after <= arrow.now().shift(days=expiry_window).format("YYYY-MM-DD"))
+
+    return database.db.session.query(Certificate).filter(*filters)
+
+
+def _get_cert_expiry_in_days(cert_not_after):
+    time_until_expiration = arrow.get(cert_not_after) - arrow.utcnow()
+    return time_until_expiration.days

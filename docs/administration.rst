@@ -82,7 +82,7 @@ Basic Configuration
 
     ::
 
-        CORS_ALLOW_HEADERS = Content-Type
+        CORS_ALLOW_HEADERS = Authorization,Content-Type
 
 
 .. data:: CORS_ALLOW_METHODS

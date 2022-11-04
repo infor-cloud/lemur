@@ -8,6 +8,7 @@
 from lemur import database
 from lemur.api_keys.models import ApiKey
 from lemur.logs import service as log_service
+from flask import current_app
 
 
 def get(aid):
@@ -60,6 +61,30 @@ def create(**kwargs):
     api_key = ApiKey(**kwargs)
     # this logs only metadata about the api key
     log_service.audit_log("create_api_key", api_key.name, f"Creating the API key {api_key}")
+    min_ttl = current_app.config.get("LEMUR_API_KEY_MIN_TTL")
+    max_ttl = current_app.config.get("LEMUR_API_KEY_MAX_TTL")
+    if min_ttl and not max_ttl:
+        if api_key.ttl < min_ttl:
+            return (
+                dict(
+                    message="Invalid TTL. TTL minimum value is {0}".format(
+                        min_ttl
+                    )
+                ),
+                400,
+            )
+    elif max_ttl:
+        if not min_ttl:
+            min_ttl = -1
+        if api_key.ttl > max_ttl or api_key.ttl < min_ttl:
+            return (
+                dict(
+                    message="Invalid TTL. TTL valid range is from {} to {}".format(
+                        min_ttl,max_ttl
+                    )
+                ),
+                400,
+            )
 
     database.create(api_key)
     return api_key

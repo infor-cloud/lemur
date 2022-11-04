@@ -177,6 +177,27 @@ Basic Configuration
 
         LEMUR_ENCRYPTION_KEYS = ['1YeftooSbxCiX2zo8m1lXtpvQjy27smZcUUaGmffhMY=', 'LAfQt6yrkLqOK5lwpvQcT4jf2zdeTQJV1uYeh9coT5s=']
 
+.. data:: LEMUR_API_KEY_MIN_TTL
+    :noindex:
+
+        The LEMUR_API_KEY_MIN_TTL is used to define minimum value for TTL. If we define this, Lemur will allow API key token 
+        with ttl greater than equal to LEMUR_API_KEY_MIN_TTL. It is optional.
+
+    ::
+
+        LEMUR_API_KEY_MIN_TTL = 30
+
+
+.. data:: LEMUR_API_KEY_MAX_TTL
+    :noindex:
+
+        The LEMUR_API_KEY_MAX_TTL is used to define maximum value for TTL. If we define this, Lemur will allow API key token 
+        with ttl less than than equal to LEMUR_API_KEY_MAX_TTL. It is optional.
+
+    ::
+
+        LEMUR_API_KEY_MAX_TTL = 90
+
 
 .. data:: PUBLIC_CA_MAX_VALIDITY_DAYS
     :noindex:

@@ -80,7 +80,7 @@ def create(**kwargs):
             return (
                 dict(
                     message="Invalid TTL. TTL valid range is from {} to {}".format(
-                        min_ttl,max_ttl
+                        min_ttl, max_ttl
                     )
                 ),
                 400,

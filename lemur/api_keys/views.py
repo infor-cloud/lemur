@@ -276,7 +276,6 @@ class ApiKeyUserList(AuthenticatedResource):
         if type(access_token) is tuple:
             return access_token
 
-
         return dict(
             jwt=create_token(access_token.user_id, access_token.id, access_token.ttl)
         )

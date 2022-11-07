@@ -63,6 +63,7 @@ def create(**kwargs):
     log_service.audit_log("create_api_key", api_key.name, f"Creating the API key {api_key}")
     min_ttl = current_app.config.get("LEMUR_API_KEY_MIN_TTL")
     max_ttl = current_app.config.get("LEMUR_API_KEY_MAX_TTL")
+    
     if min_ttl and not max_ttl:
         if api_key.ttl < int(min_ttl):
             return (
@@ -76,10 +77,14 @@ def create(**kwargs):
     elif max_ttl:
         if not min_ttl:
             min_ttl = -1
+        log_service.audit_log("create_api_key", api_key.name, f"min_ttl : {min_ttl}, type: {type(min_ttl)}")
+        log_service.audit_log("create_api_key", api_key.name, f"max_ttl : {min_ttl}, type: {type(max_ttl)}")
+        log_service.audit_log("create_api_key", api_key.name, f"api_key.ttl : {api_key.ttl}, type: {type(api_key.ttl)}")
+        log_service.audit_log("create_api_key", api_key.name, f"min_ttl_int : {type(int(min_ttl))}, max_ttl_int: {type(int(max_ttl))}")
         if api_key.ttl > int(max_ttl) or api_key.ttl < int(min_ttl):
             return (
                 dict(
-                    message="Invalid TTL. TTL valid range is from {} to {}".format(
+                    message="Invalid TTL. TTL valid range is from {0} to {1}".format(
                         min_ttl, max_ttl
                     )
                 ),

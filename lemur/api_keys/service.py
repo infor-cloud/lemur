@@ -64,7 +64,7 @@ def create(**kwargs):
     min_ttl = current_app.config.get("LEMUR_API_KEY_MIN_TTL")
     max_ttl = current_app.config.get("LEMUR_API_KEY_MAX_TTL")
     if min_ttl and not max_ttl:
-        if api_key.ttl < min_ttl:
+        if api_key.ttl < int(min_ttl):
             return (
                 dict(
                     message="Invalid TTL. TTL minimum value is {0}".format(
@@ -76,7 +76,7 @@ def create(**kwargs):
     elif max_ttl:
         if not min_ttl:
             min_ttl = -1
-        if api_key.ttl > max_ttl or api_key.ttl < min_ttl:
+        if api_key.ttl > int(max_ttl) or api_key.ttl < int(min_ttl):
             return (
                 dict(
                     message="Invalid TTL. TTL valid range is from {} to {}".format(

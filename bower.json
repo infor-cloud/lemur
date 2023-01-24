@@ -12,7 +12,7 @@
     "json3": "~3.3",
     "es5-shim": "~4.5.0",
     "angular-bootstrap": "~2.5.0",
-    "angular-animate": "~1.8.3",
+    "angular-animate": "~1.8.2",
     "restangular": "~1.6.1",
     "ng-table": "~0.8.3",
     "moment": "~2.29.4",

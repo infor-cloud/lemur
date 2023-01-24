@@ -22,7 +22,7 @@
     "moment-range": "~3.0.3",
     "angular-clipboard": "~1.7.0",
     "angularjs-toaster": "~3.0.0",
-    "angular-chart.js": "~1.1.1",
+    "angular-chart.js": "~0.8.8",
     "ngletteravatar": "~4.0.0",
     "bootswatch": "3.4.1+1",
     "fontawesome": "~4.5.0",

@@ -129,7 +129,7 @@ flask-sqlalchemy==2.5.1
     # via
     #   -r requirements.in
     #   flask-migrate
-future==0.18.2
+future==0.18.3
     # via -r requirements.in
 gunicorn==20.1.0
     # via -r requirements.in
@@ -297,7 +297,7 @@ vine==5.0.0
     #   kombu
 wcwidth==0.2.5
     # via prompt-toolkit
-werkzeug==2.0.3
+werkzeug==2.1.1
     # via
     #   -r requirements.in
     #   flask

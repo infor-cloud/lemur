@@ -107,6 +107,10 @@ def configure_hook(app):
 
     @app.after_request
     def after_request(response):
+        # Set response headers
+        response.headers["Content-Security-Policy"] = "default-src 'self' infor.com *.infor.com"
+        response.headers["X-Frame-Options"] = "DENY"
+
         # Return early if we don't have the start time
         if not hasattr(g, "request_start_time"):
             return response
